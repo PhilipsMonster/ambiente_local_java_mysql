@@ -1,0 +1,149 @@
+---
+# PLAY PARA CONFIGURACAO DA BOOTCAMP
+- hosts: bootcamp
+  name: Configurando a Bootcamp
+  remote_user: vagrant
+  become: yes
+  tasks:
+    - name: Ajustando Timezone
+      timezone:
+        name: America/Sao_Paulo
+
+    - name: Adicionando Key do Repositorio do GCLOUD
+      apt_key:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        state: present
+
+    - name: Adicionando o Repositório do GCLOUD
+      apt_repository:
+        repo: "deb http://packages.cloud.google.com/apt cloud-sdk main"
+        update_cache: no
+
+    - name: Adicionando Key do Repositorio do Terraform
+      apt_key:
+        url: https://apt.releases.hashicorp.com/gpg 
+        state: present
+
+    - name: Adicionando o Repositório do Terraform
+      apt_repository:
+        repo: "deb [arch=amd64] https://apt.releases.hashicorp.com {{ ansible_distribution_release }} main" 
+        update_cache: yes
+
+    - name: Adicionando o Repositório do Git
+      apt_repository:
+        repo: 'ppa:git-core/ppa'
+        update_cache: no
+
+    - name: Adicionando Key do Repositorio do Docker
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Adicionando o Repositório do Docker
+      apt_repository:
+        repo: "deb https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        update_cache: yes
+
+    - name: Instalação do GCLOUD, Terraform, Docker e outras dependências
+      apt:
+        pkg: ['google-cloud-sdk','unzip', 'docker-ce', 'build-essential', 'zlib1g-dev', 'libssl-dev', 'libncurses-dev', 'libffi-dev', 'libsqlite3-dev', 'libreadline-dev', 'libbz2-dev', 'ruby', 'python-is-python3', 'curl', 'maven']
+        state: present
+
+    - name: Manter sempre a última versão do Git e Terraform 
+      apt:
+         pkg: ['git','terraform'] 
+         state: latest
+
+    - name: Adicionar Usuario Vagrant no Grupo Docker
+      user:
+        name: vagrant
+        comment: Vagrant User
+        groups: docker
+
+    ############# Setup do Ambiente de Desenvolvimento Java
+    - name: Only run "update_cache=yes" if the last one is more than 3600 seconds ago
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install JAVA related Ubuntu packages
+      apt:
+        name: "{{ packages }}"
+        state: latest
+      vars:
+        packages:
+          - openjdk-11-jdk
+           
+    - name: Set JAVA_HOME
+      lineinfile:
+        dest: /etc/environment
+        state: present
+        regexp: '^JAVA_HOME'
+        line: 'JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64'
+    
+    ############ Setup NGINX
+    - name: ensure nginx is at the latest version
+      apt: name=nginx state=latest
+      become: yes
+    - name: start nginx
+      service:
+          name: nginx
+          state: started
+      become: yes
+    - name: copy the nginx config file and restart nginx
+      copy:
+        src: /vagrant/ansible/nginx_config_file.cfg
+        dest: /etc/nginx/sites-available/nginx_config_file.cfg
+      become: yes    
+    - name: restart nginx
+      service:
+        name: nginx
+        state: restarted
+      become: yes
+    
+    ############ Setup MySQL
+    - name: Installing Mysql  and dependencies
+      package:
+         name: "{{item}}"
+         state: present
+         update_cache: yes
+      loop:
+        - mysql-server
+        - mysql-client
+        - python3-mysqldb
+        - libmysqlclient-dev
+      become: yes
+       
+    - name: start and enable mysql service
+      service:
+         name: mysql
+         state: started
+         enabled: yes
+
+    - name: creating mysql user 
+      mysql_user:
+         name: "{{db_user}}"
+         password: "{{db_pass}}"
+         priv: '*.*:ALL'
+         host: '%'
+         state: present
+    
+    - name: creating db 
+      mysql_db:
+         name: "{{db_name}}"
+         state: present
+    
+    - name: Enable remote login to mysql
+      lineinfile:
+         path: /etc/mysql/mysql.conf.d/mysqld.cnf
+         regexp: '^bind-address'
+         line: 'bind-address = 0.0.0.0'
+         backup: yes
+      notify:
+        - Restart mysql
+
+  handlers:
+    - name: Restart mysql
+      service:
+        name: mysql
+        state: restarted
